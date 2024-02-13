@@ -1,0 +1,17 @@
+{
+    "name": "serverless-ansible-vault",
+    "version": "1.0.0",
+    "description": "A plugin to allow use of the ansible vault in serverless configuration",
+    "main": "index.js",
+    "keywords": [
+      "serverless",
+      "ansible",
+      "vault"
+    ],
+    "author": "Junaide <junaidebhatt@gmail.com> (https://github.com/junaide)",
+    "repository": "junaide/serverless-ansible-vault",
+    "peerDependencies": {
+      "serverless": "^3.0.0"
+    }
+  }
+  

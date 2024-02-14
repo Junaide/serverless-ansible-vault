@@ -29,11 +29,11 @@ custom:
     virtualenv: `path/to/ansible/virtualenv` #Optional
 ```
 
-After this you can now start to reference your vault variables in the provider environtment section like this:
+After this you can now start to reference your vault variables in the provider environment section like this:
 
 ```yaml
 provider:
-    environtment:
+    environment:
         USERNAME: "{{ vault_username }}"
         PASSWORD: "{{ vault_password }}"
         LOGIN: "{{ vault_username }}:{{ vault_password }}"

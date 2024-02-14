@@ -1,38 +1,63 @@
 'use strict';
 
-const { execSync, exec } = require('child_process');
+const { execSync } = require('child_process');
 
 class ServerlessAnsibleVaultPlugin {
   constructor(serverless, options) {
     this.serverless = serverless;
     this.options = options;
 
+    this.validateVaultConfig()
+
     this.hooks = {
       'before:package:initialize': this.replaceVaultVariables.bind(this),
     };
   }
 
+  validateVaultConfig() {
+    const ansibleVaultConfig = this.serverless.service.custom?.ansibleVault;
+    if (!ansibleVaultConfig) {
+      throw new this.serverless.classes.Error('No Ansible Vault configuration found in serverless.yml under custom.ansibleVault');
+    }
+
+    if (!ansibleVaultConfig.path) {
+      throw new this.serverless.classes.Error('Ansible Vault configuration error: "path" is required');
+    }
+
+    if (!ansibleVaultConfig.passwordFile) {
+      throw new this.serverless.classes.Error('Ansible Vault configuration error: "passwordFile" is required');
+    }
+  }
+
+
   replaceVaultVariables() {
     const vaultPath = this.serverless.service.custom.ansibleVault.path;
     const vaultPasswordFile = this.serverless.service.custom.ansibleVault.passwordFile;
     const ansibleVirtualenvPath = this.serverless.service.custom.ansibleVault.virtualenv;
-    const variables = this.serverless.service.custom.ansibleVault.vars;
+    const variables = this.serverless.service.provider.environment
 
     const vaultVariables = {}
-    const vaultRegex = /\{\{(.+?)\}\}/g;
-    
+    const vaultRegex = /\{\{\s*(.+?)\s*\}\}/g;
 
     try {
     
-      // attempt to enter the virtual env and throw an error if we can't.
-      try{
-        const virutalenv = execSync(`source ${ansibleVirtualenvPath}`, { encoding: 'utf-8', shell: '/bin/bash' });
-      }catch(err){
-        throw new this.serverless.classes.Error(`Failed to enter the ansible virtualenv, please recheck the 'virtualenv' path.`);
-      } 
-
-
-      const decryptedOutput = execSync(`source ${ansibleVirtualenvPath} && ansible-vault decrypt ${vaultPath} --output=- --vault-password-file=${vaultPasswordFile}`, { encoding: 'utf-8', shell: '/bin/bash' });
+      let decryptedOutput;
+      try {
+        // Redirect stderr to null to avoid printing errors from this command
+        decryptedOutput = execSync(`ansible-vault decrypt ${vaultPath} --output=- --vault-password-file=${vaultPasswordFile}`, { encoding: 'utf-8', shell: '/bin/bash', stdio: ['ignore', 'pipe', 'ignore'] });
+      } catch (err) {
+        if (ansibleVirtualenvPath) {
+          try {
+            // Attempt the command again within the virtual environment, also suppressing stderr output
+            decryptedOutput = execSync(`source ${ansibleVirtualenvPath} && ansible-vault decrypt ${vaultPath} --output=- --vault-password-file=${vaultPasswordFile}`, { encoding: 'utf-8', shell: '/bin/bash', stdio: ['ignore', 'pipe', 'ignore'] });
+          } catch (innerErr) {
+            throw new Error(`[serverless-ansible-vault] Failed to decrypt using Ansible vault with the virtualenv: ${innerErr.message}`);
+          }
+        } else {
+          throw new Error(`[serverless-ansible-vault] Ansible environment not found. If you are using a virtualenv, add the 'virtualenv' parameter with a path to the /bin/activate to 'ansibleVault'.`);
+        }
+      }
+      
       const lines = decryptedOutput.split('\n');
 
       // Store the vault vars to an object
@@ -46,19 +71,20 @@ class ServerlessAnsibleVaultPlugin {
 
       // Iterate the serverless.service.custom.ansibleVault.vars and replace all instances of {{ }} with the vault password.
       for (const [key, value] of Object.entries(variables)) {
+        let newValue = value
         const matches = [...value.matchAll(vaultRegex)].map(match => match[1]);
         
         matches.forEach(vaultKey => {
             if(vaultVariables[vaultKey] != null) {
-                variables[key] = variables[key].replace(`{{${vaultKey}}}`, vaultVariables[vaultKey])
+              newValue = newValue.replace(new RegExp(`\\{\\{\\s*${vaultKey}\\s*\\}\\}`, 'g'), vaultVariables[vaultKey]);
             }else{
-                throw new this.serverless.classes.Error(`Could not find ${vaultKey} in the ansible vault.`);
+                throw new this.serverless.classes.Error(`[serverless-ansible-vault] Could not find ${vaultKey} in the ansible vault.`);
             }
-        })
-
+        });
+        variables[key] = newValue;
       }
     } catch (error) {
-      this.serverless.cli.log('Error replacing Ansible Vault variables:', error);
+      this.serverless.cli.log('[serverless-ansible-vault] Error replacing Ansible Vault variables:', error);
       throw error;
     }
   }
